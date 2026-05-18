@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\EmployeeController;
+
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -17,8 +19,13 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
-Route::middleware(['auth', 'role:admin,rh'])->group(function () {
-    // routes RH et admin
+Route::middleware(['auth'])->group(function () {
+
+    // Accessible à admin et rh uniquement
+    Route::middleware(['role:admin,rh'])->group(function () {
+        Route::resource('employees', EmployeeController::class);
+    });
+
 });
 
 Route::middleware(['auth', 'role:admin'])->group(function () {
