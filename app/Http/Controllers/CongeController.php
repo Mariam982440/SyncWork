@@ -4,10 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Employee;
 use App\Models\CongeRequest;
+use App\Models\LeaveBalance;
 use App\Services\LeaveService;
 use App\Http\Requests\StoreCongeRequest;
 use App\Http\Requests\RejectCongeRequest;
-use Illuminate\Http\Request;
 
 class CongeController extends Controller
 {
@@ -20,24 +20,25 @@ class CongeController extends Controller
     public function index()
     {
         $user = auth()->user();
+        $employee = null;
 
         if ($user->hasRole(['admin', 'rh'])) {
             $conges = CongeRequest::with('employee')
                 ->latest()
                 ->paginate(15);
         } else {
-            $employee = Employee::where('email', $user->email)->firstOrFail();
+            $employee = $this->employeeForUser($user);
             $conges   = $employee->congeRequests()->latest()->paginate(15);
         }
 
-        return view('conges.index', compact('conges'));
+        return view('conges.index', compact('conges', 'employee'));
     }
 
     public function create()
     {
         $user     = auth()->user();
-        $employee = Employee::where('email', $user->email)->firstOrFail();
-        $balance  = $employee->leaveBalance(now()->year);
+        $employee = $this->employeeForUser($user);
+        $balance  = $this->balanceForEmployee($employee);
 
         return view('conges.create', compact('employee', 'balance'));
     }
@@ -45,7 +46,7 @@ class CongeController extends Controller
     public function store(StoreCongeRequest $request)
     {
         $user     = auth()->user();
-        $employee = Employee::where('email', $user->email)->firstOrFail();
+        $employee = $this->employeeForUser($user);
 
         $workingDays = $this->leaveService->countWorkingDays(
             $request->start_date,
@@ -106,7 +107,7 @@ class CongeController extends Controller
         abort_unless($conge->isPending(), 422, 'Impossible d\'annuler une demande déjà traitée.');
 
         // Vérifie que c'est bien la demande de l'employé connecté
-        $employee = Employee::where('email', auth()->user()->email)->firstOrFail();
+        $employee = $this->employeeForUser(auth()->user());
         abort_unless($conge->employee_id === $employee->id, 403);
 
         if ($conge->isApproved()) {
@@ -116,5 +117,41 @@ class CongeController extends Controller
         $conge->delete();
 
         return back()->with('success', 'Demande annulée.');
+    }
+
+    private function employeeForUser($user): Employee
+    {
+        $employee = Employee::firstOrCreate(
+            ['email' => $user->email],
+            [
+                'first_name' => $this->firstNameFrom($user->name),
+                'last_name' => $this->lastNameFrom($user->name),
+                'department' => 'Non affecte',
+                'position' => 'Employe',
+                'hire_date' => now()->toDateString(),
+            ]
+        );
+
+        $this->balanceForEmployee($employee);
+
+        return $employee;
+    }
+
+    private function balanceForEmployee(Employee $employee): LeaveBalance
+    {
+        return LeaveBalance::firstOrCreate(
+            ['employee_id' => $employee->id, 'year' => now()->year],
+            ['accrued_days' => 0, 'used_days' => 0, 'available_days' => 0]
+        );
+    }
+
+    private function firstNameFrom(string $name): string
+    {
+        return preg_split('/\s+/', trim($name), 2)[0] ?? 'Utilisateur';
+    }
+
+    private function lastNameFrom(string $name): string
+    {
+        return preg_split('/\s+/', trim($name), 2)[1] ?? '';
     }
 }
